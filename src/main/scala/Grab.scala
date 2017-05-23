@@ -5,9 +5,13 @@ import scala.io.Source //Read files, local and remote
 import java.time.LocalDate //DateTime ops
 import java.time.format.DateTimeFormatter //Format datetime
 
+import sys.process._ //Piping
+import java.net.URL //Donwload
+import java.io.File // Save
+import scala.language.postfixOps //Allow !! at end of pipe call
 
 object Grab { 
-    // TODO, multiple parameter options
+    // TODO
     /* 
      * Grab [start yyyy-mm-dd] [end yyyy-mm-dd]
          * Default to both == today
@@ -67,15 +71,19 @@ object MediaGrabber{
         val matches = dest_dir.listFiles.filter(_.isFile).toList.filter{ file =>
             file.getName.startsWith(date_str)
         }
+        /*
         // If it is, grab image for this date
         if(matches.length==0){
+            */
             GrabMedia(date_str)
+            /*
         }
         else{
             // Otherwise, continue
             printf("[-] File already exists for date: %s, continuing on next date\n",
                 date_str)
         }
+        */
 
     }
 
@@ -127,6 +135,12 @@ object MediaGrabber{
         }
     }
     def GrabImage(resp: Response) = {
+        val out_fn = resp.date+"-"+resp.title.replaceAll("[^A-Za-z0-9]","_")
+        val out_full = Grab.pod_dir+out_fn+".jpg"
+        printf("[+] Grabbing image from URL: %s\n",resp.hdurl)
+        printf("[+] Saving as filename: %s\n", out_full)
+
+        new URL(resp.hdurl) #> new File(out_full) !!
 
     }
 
