@@ -10,6 +10,8 @@ import java.net.URL //Donwload
 import java.io.File // Save
 import scala.language.postfixOps //Allow !! at end of pipe call
 
+import java.nio.file._ // Create hard link
+
 object Grab { 
     // TODO
     /* 
@@ -28,8 +30,8 @@ object Grab {
 
     val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd")
     // Put these in a settings file
-    val pod_dir = "/Users/adam/Desktop/NasaDailyPics/"
-    val screensaver_dir = "/Users/adam/Pictures/Screen Saver Pics/"
+    val pod_dir = "/Users/adam/Desktop/NasaDailyPics2/"
+    val screensaver_dir = "/Users/adam/Desktop/ScreenSaverPics/"
 
     def main(args: Array[String]) = {
         // Grab start and end dates from agrs
@@ -38,10 +40,12 @@ object Grab {
             endDate.format(fmt))
 
         // For every date from start to end inclusive...
-        val numberOfDays = startDate.until(endDate).getDays()
-        for (diff <- 0 to numberOfDays)
+        val numberOfDays = java.time.temporal.ChronoUnit.DAYS.between(startDate,endDate).toInt
+        println(numberOfDays)
+        for (diff <- 0 to numberOfDays){
             // Grab the file if we don't already have it
             MediaGrabber.CheckAndGrab(startDate.plusDays(diff))
+        }
     }
 
     def parseArgs(args: Array[String]) = {
@@ -130,21 +134,59 @@ object MediaGrabber{
                     case "video" => GrabVideo(resp)
                     case default => printf("[!] Unknown media type found: %s\n",default)
                 }
+                printf("[+] Done\n")
             }
             case None  => printf("[-] Could not query NASA API\n")
         }
     }
+    
+    def MakeFilename(resp: Response): String = {
+        resp.date+"-"+resp.title.replaceAll("[^A-Za-z0-9]","_")
+    }
+
     def GrabImage(resp: Response) = {
-        val out_fn = resp.date+"-"+resp.title.replaceAll("[^A-Za-z0-9]","_")
-        val out_full = Grab.pod_dir+out_fn+".jpg"
+        val url = if (resp.hdurl!="") resp.hdurl else resp.url
+        val file_ext = url.split('.').last
+        val out_fn = MakeFilename(resp)+"."+file_ext
+        val out_full = Grab.pod_dir+out_fn
         printf("[+] Grabbing image from URL: %s\n",resp.hdurl)
         printf("[+] Saving as filename: %s\n", out_full)
 
-        new URL(resp.hdurl) #> new File(out_full) !!
+        // Download image and save
+        val exit_status = new URL(resp.hdurl) #> new File(out_full) !
 
+        if (exit_status != 0){
+            printf("[-] Download and save returned with exit status: %d\n",
+                exit_status)
+        }
+
+        // Link to screen saver path
+        try{
+            val destination = Grab.screensaver_dir+out_fn
+            Files.createLink(Paths.get(destination), Paths.get(out_full));
+        }catch{
+            case exists : java.nio.file.FileAlreadyExistsException => {
+                printf("[-] Hard link already exists\n")
+            }
+            case e : Throwable => {
+                printf("[!] Error creating link!")
+                e.printStackTrace
+            }
+        }
     }
 
     def GrabVideo(resp: Response) = {
+        val out_fn = MakeFilename(resp)
+        val out_full = Grab.pod_dir+out_fn
+
+        val exit_status = "youtube-dl -f 38/37/84/22/85/82/83/18/17/35/34/5 "+
+                            "-o "+out_full+".%(ext)s"+
+                            " --restrict-filenames "+resp.url !
+
+        if (exit_status != 0){
+            printf("Youtube-dl failed with exit status: %d\n",exit_status)
+            printf("Skipping this day because there is no easy way to download media\n")
+        }
 
     }
 }
