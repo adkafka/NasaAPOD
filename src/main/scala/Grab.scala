@@ -18,14 +18,14 @@ object Grab {
      * Grab [start yyyy-mm-dd] [end yyyy-mm-dd]
          * Default to both == today
              * Or, start date is last file in directory... may introduce errors
-         * yyyy-mm-dd
+             * Or, if one date given, only do that date...
      * Add configuration to one file
          * API key
          * Destination Directory
          * Directory to put sym links in
-     * Retry on HTTP failures?
-         * Abstract HTTP stuff to one object. 
-         * Have to string and to file methods
+     * Read through and refactor some things
+         * Use Option when available
+         * What to return from funcs...
      */
 
     val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd")
@@ -41,7 +41,6 @@ object Grab {
 
         // For every date from start to end inclusive...
         val numberOfDays = java.time.temporal.ChronoUnit.DAYS.between(startDate,endDate).toInt
-        println(numberOfDays)
         for (diff <- 0 to numberOfDays){
             // Grab the file if we don't already have it
             MediaGrabber.CheckAndGrab(startDate.plusDays(diff))
