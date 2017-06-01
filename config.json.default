@@ -1,0 +1,6 @@
+{
+    "pod_dir" : "Put the destination directory here",
+    "screensaver_dir" : "If you would like the files hardlinked to another directory, put it here. Otherwise, leave this blank",
+    "api_key" : "Insert API key here. You can get it here: https://api.nasa.gov/#apply-for-an-api-key"
+
+}
