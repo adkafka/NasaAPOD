@@ -13,6 +13,7 @@ import scala.language.postfixOps //Allow '!!' and '!' at end of pipe call
 
 object Grab { 
     /* 
+     * TODO...
      * Default params...
          * Or, start date is last file in directory... may introduce errors
          * Or, if one date given, only do that date...
@@ -60,24 +61,26 @@ object Config {
     var config : Config_Opts = null
     val config_path = "./config.json"
     
+    /* Case class used to parse option config file
+     * These names match the fields exactly in config */
     case class Config_Opts (
         pod_dir : String = "",
         screensaver_dir : String = "",
         api_key : String = "")
 
-    def pod_dir() = {
+    def pod_dir() : String = {
         read_config
         // If it is still empty...
         if (config.pod_dir=="") Grab.error("No POD directory set in config file")
 
         config.pod_dir
     }
-    def screensaver_dir() = {
+    def screensaver_dir() : String = {
         read_config
 
         config.screensaver_dir
     }
-    def api_key() = {
+    def api_key() : String = {
         read_config
         // If it is still empty...
         if (config.api_key=="") Grab.error("No API key found in config file")
@@ -98,6 +101,21 @@ object Config {
 
 
 object MediaGrabber{
+    /* Case class for parsing the JSON response
+     * sent by the NASA pod API. These field names
+     * match exactly those sent by the API. */
+    case class Response(
+        copyright : String = "",
+        date : String = "",
+        explanation : String = "",
+        hdurl : String = "",
+        media_type : String = "",
+        service_version : String = "",
+        title : String = "",
+        url : String = "" )
+
+    /* Check if we already downloaded the POD for
+     * this date. If not, download it */
     def CheckAndGrab(date: LocalDate) = {
         val date_str = date.format(Grab.fmt)
         val dest_dir = new java.io.File(Config.pod_dir)
@@ -124,6 +142,9 @@ object MediaGrabber{
 
     }
 
+    /* Make the API call and parse the JSON, returning an
+     * instance of the case class Response, in the form of
+     * an option */
     def FetchJson(date : String = "") : Option[Response] = {
         val API_KEY = Config.api_key
         var URL = "https://api.nasa.gov/planetary/apod"
@@ -150,6 +171,7 @@ object MediaGrabber{
 
     }
 
+    /* Call Fetch Json and match to correct media downloader */
     def GrabMedia(date : String = "") = {
         printf("[+] Grabbing for day: %s\n",date)
         FetchJson(date) match {
@@ -170,10 +192,15 @@ object MediaGrabber{
         }
     }
     
+    /* Helper method for creating the destination filename 
+     * from the API response */
     def MakeFilename(resp: Response): String = {
         resp.date+"-"+resp.title.replaceAll("[^A-Za-z0-9]","_")
     }
 
+    /* Grab a POD where media_type==image 
+     * Additionally, create a hardlink in the screensaver_dir
+     * if the config is set to do so. */
     def GrabImage(resp: Response) = {
         val url = if (resp.hdurl!="") resp.hdurl else resp.url
         val file_ext = url.split('.').last
@@ -207,6 +234,7 @@ object MediaGrabber{
         }
     }
 
+    /* Grab a POD where media_type==video */
     def GrabVideo(resp: Response) = {
         val out_fn = MakeFilename(resp)
         val out_full = Config.pod_dir+out_fn
@@ -214,6 +242,10 @@ object MediaGrabber{
         printf("[+] Grabbing video from URL: %s\n",resp.url)
         printf("[+] Saving as filename: %s\n", out_full)
 
+        /* This call attempts to use 'youtube-dl' to download
+         * the video media at the url. It tries to download the 
+         * highest quality mp4 less than 100MB, and falls back to 
+         * highest quality anything, less than 100MB */
         val exit_status = "youtube-dl --no-progress "+
             "-f bestvideo[ext=mp4][filesize<100M]+bestaudio[ext=m4a]/best[ext=mp4][filesize<100M]/best[filesize<100M] "+
             "-o "+out_full+".%(ext)s"+
@@ -227,12 +259,3 @@ object MediaGrabber{
     }
 }
 
-case class Response(
-    copyright : String = "",
-    date : String = "",
-    explanation : String = "",
-    hdurl : String = "",
-    media_type : String = "",
-    service_version : String = "",
-    title : String = "",
-    url : String = "" )
