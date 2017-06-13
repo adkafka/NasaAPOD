@@ -14,41 +14,114 @@ import scala.language.postfixOps //Allow '!!' and '!' at end of pipe call
 object Grab { 
     /* 
      * TODO...
-     * Default params...
-         * Or, start date is last file in directory... may introduce errors
-         * Or, if one date given, only do that date...
-     * Read through and refactor some things
-         * Use Option when available
-         * What to return from funcs...
+     * Add more params
+        * -s startdate [yyyy-mm-dd]
+        * -e enddate [yyyy-mm-dd]
+        * -p : prompt to create ignore files on failure
+        * -q : quiet?
+        * -r : reverse?
+     * OR
+        * --resume-mode : Start date at last succesful date (last file in pod_dir)
      */
     val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd")
 
     def main(args: Array[String]) = {
-        // Grab start and end dates from agrs
-        val (startDate, endDate) = parseArgs(args)
-        printf("[*] Grabbing NASA POD from %s -> %s\n",startDate.format(fmt),
-            endDate.format(fmt))
-
-        // For every date from start to end inclusive...
-        val numberOfDays = java.time.temporal.
-            ChronoUnit.DAYS.between(startDate,endDate).toInt
-        for (diff <- 0 to numberOfDays){
-            // Grab the file if we don't already have it
-            MediaGrabber.CheckAndGrab(startDate.plusDays(diff))
+        val options = parseArgs(args)
+        
+        options('mode).asInstanceOf[String] match{
+            case "resume" => normalmode(
+                lastCompleteDate.plusDays(1),
+                LocalDate.now
+            )
+            case "normal" => normalmode(
+                options('start).asInstanceOf[LocalDate],
+                options('end).asInstanceOf[LocalDate]
+            )
+            case err => error("Invalid mode: %s".format(err))
         }
-        println("[+] No more dates, done")
     }
 
-    def parseArgs(args: Array[String]) = {
-        /* For now, default to current date. */
-        val startDate = if (args.length>=1) LocalDate.parse(args(0),fmt) 
-                        else LocalDate.now
-        val endDate   = if (args.length>=2) LocalDate.parse(args(1),fmt) 
-                        else LocalDate.now
-        if (endDate.isBefore(startDate))
-            error("Error, you must provide an end date that is after the start Date")
+    def lastCompleteDate(): LocalDate = {
+        val dateRegex = """(\d\d\d\d)-(\d\d)-(\d\d)""".r
+        val dest_dir = new java.io.File(Config.pod_dir)
+        // Make sure directory in config is present
+        if(!dest_dir.exists){
+            error("Invalid pod_dir: %s".format(Config.pod_dir))
+        }
 
-        (startDate,endDate)
+        val listOfFiles = dest_dir.listFiles.filter{
+                s => dateRegex.findFirstIn(s.getName).isDefined
+            }.toList
+        val lastFile = listOfFiles.sorted.last
+        val lastDate = dateRegex.findFirstIn(lastFile.getName)
+
+        lastDate match{
+            case Some(datestr) => parseDate(datestr)
+            case None => LocalDate.now
+        }
+    }
+
+    def normalmode(startDate: LocalDate, endDate: LocalDate) = {
+        if(startDate.isAfter(endDate)){
+            println("[*] Already up to date.")
+        }
+        else{
+            printf("[*] Grabbing NASA POD from %s -> %s\n",startDate.format(fmt),
+                endDate.format(fmt))
+
+            // For every date from start to end inclusive...
+            val numberOfDays = java.time.temporal.
+                ChronoUnit.DAYS.between(startDate,endDate).toInt
+            for (diff <- 0 to numberOfDays){
+                // Grab the file if we don't already have it
+                MediaGrabber.CheckAndGrab(startDate.plusDays(diff))
+            }
+            println("[+] No more dates, done")
+        }
+    }
+
+    def parseDate(datein: String): LocalDate = {
+        try{
+            LocalDate.parse(datein,fmt)
+        }
+        catch{
+            case parseEx : java.time.format.DateTimeParseException => 
+                error("Invalid date input (%s). Must be yyyy-mm-dd.".format(datein))
+                // Keep compiler happy (unreachable code)
+                LocalDate.now
+            case e  : Throwable => 
+                e.printStackTrace
+                // Keep compiler happy (unreachable code)
+                LocalDate.now
+        }
+    }
+
+    def parseArgs(args: Array[String]): Map[Symbol,Any] = {
+        val arglist = args.toList
+
+        def nextOption(map : Map[Symbol,Any], list: List[String]) : Map[Symbol,Any] = {
+            list match {
+                case Nil => map
+                case ("-m" | "--mode") :: value :: tail =>
+                    nextOption(map ++ Map('mode -> value), tail)
+
+                case ("-s" | "--start") :: value :: tail =>
+                    nextOption(map ++ Map('start -> parseDate(value)), tail)
+                case ("-e" | "--end") :: value :: tail =>
+                    nextOption(map ++ Map('end -> parseDate(value)), tail)
+
+                case option :: tail => {
+                    println("Unknown option "+option) 
+                    map
+                }
+            }
+        }
+        // Start tail recursion with defaults already in place
+        nextOption(Map(
+                ('mode -> "normal"),
+                ('start -> LocalDate.now),
+                ('end -> LocalDate.now),
+            ),arglist)
     }
 
     def error(error_msg: String) = {
@@ -116,7 +189,7 @@ object MediaGrabber{
 
     /* Check if we already downloaded the POD for
      * this date. If not, download it */
-    def CheckAndGrab(date: LocalDate) = {
+    def CheckAndGrab(date: LocalDate) : Boolean = {
         val date_str = date.format(Grab.fmt)
         val dest_dir = new java.io.File(Config.pod_dir)
 
@@ -138,6 +211,7 @@ object MediaGrabber{
             // Otherwise, continue
             printf("[-] File already exists for date: %s, continuing on next date\n",
                 date_str)
+            false
         }
 
     }
@@ -172,7 +246,7 @@ object MediaGrabber{
     }
 
     /* Call Fetch Json and match to correct media downloader */
-    def GrabMedia(date : String = "") = {
+    def GrabMedia(date : String = ""): Boolean = {
         printf("[+] Grabbing for day: %s\n",date)
         FetchJson(date) match {
             case Some(resp) => {
@@ -182,12 +256,16 @@ object MediaGrabber{
                 resp.media_type match {
                     case "image" => GrabImage(resp)
                     case "video" => GrabVideo(resp)
-                    case default => printf("[!] Unknown media type found: %s\n",default)
+                    case default => {
+                      printf("[!] Unknown media type found: %s\n",default)
+                    }
                 }
                 printf("[+] Done with %s\n",resp.date)
+                true
             }
             case None  => {
                 printf("[-] Could not query NASA API. Make sure you are connected to the internet and you have a valid api_key in the config.json file\n")
+                false
             }
         }
     }
@@ -201,7 +279,7 @@ object MediaGrabber{
     /* Grab a POD where media_type==image 
      * Additionally, create a hardlink in the screensaver_dir
      * if the config is set to do so. */
-    def GrabImage(resp: Response) = {
+    def GrabImage(resp: Response): Boolean = {
         val url = if (resp.hdurl!="") resp.hdurl else resp.url
         val file_ext = url.split('.').last
         val out_fn = MakeFilename(resp)+"."+file_ext
@@ -215,27 +293,31 @@ object MediaGrabber{
         if (exit_status != 0){
             printf("[-] Download and save returned with exit status: %d\n",
                 exit_status)
+            false
         }
-
-        // Link to screen saver path
-        if (Config.screensaver_dir != ""){
-            try{
-                val destination = Config.screensaver_dir+out_fn
-                Files.createLink(Paths.get(destination), Paths.get(out_full));
-            }catch{
-                case exists : java.nio.file.FileAlreadyExistsException => {
-                    printf("[-] Hard link already exists\n")
+        else{
+            // Link to screen saver path
+            if (Config.screensaver_dir != ""){
+                try{
+                    val destination = Config.screensaver_dir+out_fn
+                    Files.createLink(Paths.get(destination), Paths.get(out_full));
                 }
-                case e : Throwable => {
-                    printf("[!] Error creating link!")
-                    e.printStackTrace
+                catch{
+                    case exists : java.nio.file.FileAlreadyExistsException => {
+                        printf("[-] Hard link already exists\n")
+                    }
+                    case e : Throwable => {
+                        printf("[!] Error creating link!")
+                        e.printStackTrace
+                    }
                 }
             }
+            true
         }
     }
 
     /* Grab a POD where media_type==video */
-    def GrabVideo(resp: Response) = {
+    def GrabVideo(resp: Response): Boolean = {
         val out_fn = MakeFilename(resp)
         val out_full = Config.pod_dir+out_fn
 
@@ -247,7 +329,9 @@ object MediaGrabber{
          * highest quality mp4 less than 100MB, and falls back to 
          * highest quality anything, less than 100MB */
         val exit_status = "youtube-dl --no-progress "+
-            "-f bestvideo[ext=mp4][filesize<100M]+bestaudio[ext=m4a]/best[ext=mp4][filesize<100M]/best[filesize<100M] "+
+            "-f bestvideo[ext=mp4][filesize<100M]+bestaudio[ext=m4a]/"+
+                "best[ext=mp4][filesize<100M]/"+
+                "best[filesize<100M] "+
             "-o "+out_full+".%(ext)s"+
             " --restrict-filenames "+resp.url !
 
@@ -255,6 +339,7 @@ object MediaGrabber{
             printf("[-] Youtube-dl failed with exit status: %d\n",exit_status)
             printf("[-] Skipping this day because there is no easy way to download media\n")
         }
+        true
 
     }
 }
