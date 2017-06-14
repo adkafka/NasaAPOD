@@ -36,6 +36,37 @@ object Grab {
         }
     }
 
+    def usage() = {
+        println("""
+USAGE: 
+  Using sbt:
+    In the sbt console, execute 'run [PARAMS]'
+
+  Using standalone
+    Compile the standalon application with 'sbt assembly', then execute with
+    'scala target/scala-2.12/NASA\ APOD\ grabber-assembly-1.0.jar PARAMS'
+
+PARAMS: 
+  -m, --mode [MODE]     Specify mode of operation. Valid options are:
+                        'normal'    : Download all media between start 
+                                      and end date (inclusive)
+                        'catch-up'  : Use the last succesfully downloaded 
+                                      media date as a start date. This is
+                                      useful if the script is run regularly,
+                                      say everyday via a cron job. If days
+                                      are missed, the script will simply 
+                                      "pick up where it left off last".
+                                      Start and end dates are ignored in
+                                      this mode.
+  -s, --start [DATE]    Specify start date in yyyy-mm-dd form (default to today)
+  -e, --end [DATE]      Specify end date in yyyy-mm-dd form (default to today)
+  -h, --help            Display usage and help text
+
+  See README.md for more details
+""")
+        System.exit(0)
+    }
+
     def lastCompleteDate(): LocalDate = {
         val dateRegex = """(\d\d\d\d)-(\d\d)-(\d\d)""".r
         val dest_dir = new java.io.File(Config.pod_dir)
@@ -118,6 +149,10 @@ object Grab {
                         case Success(endDate) => nextOption(map ++ Map('end -> endDate), tail)
                         case Failure(ex) => error("Invalid end date input (%s). Must be yyyy-mm-dd.".format(value)); map
                     }
+                case ("-h" | "--help") :: other => {
+                    usage
+                    map
+                }
                 case option :: tail => {
                     println("Unknown option "+option) 
                     map
