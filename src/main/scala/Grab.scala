@@ -1,6 +1,7 @@
 import org.json4s._ //Json parser
 import org.json4s.native.JsonMethods._ //Json parser
 
+import scala.util._ //Try, success, failure, etc
 import scala.io.Source //Read files, local and remote
 import java.time.LocalDate //DateTime ops
 import java.time.format.DateTimeFormatter //Format datetime
@@ -17,11 +18,8 @@ object Grab {
      * Add more params
         * -s startdate [yyyy-mm-dd]
         * -e enddate [yyyy-mm-dd]
-        * -p : prompt to create ignore files on failure
-        * -q : quiet?
-        * -r : reverse?
-     * OR
-        * --resume-mode : Start date at last succesful date (last file in pod_dir)
+        * -mode catch-up : Start date at last succesful date (last file in pod_dir)
+     * USAGE... and complimentary error func
      */
     val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd")
 
@@ -29,10 +27,7 @@ object Grab {
         val options = parseArgs(args)
         
         options('mode).asInstanceOf[String] match{
-            case "resume" => normalmode(
-                lastCompleteDate.plusDays(1),
-                LocalDate.now
-            )
+            case "catch-up" => catchupmode()
             case "normal" => normalmode(
                 options('start).asInstanceOf[LocalDate],
                 options('end).asInstanceOf[LocalDate]
@@ -49,21 +44,41 @@ object Grab {
             error("Invalid pod_dir: %s".format(Config.pod_dir))
         }
 
-        val listOfFiles = dest_dir.listFiles.filter{
+        val sortedListOfFiles = dest_dir.listFiles.filter{
                 s => dateRegex.findFirstIn(s.getName).isDefined
-            }.toList
-        val lastFile = listOfFiles.sorted.last
-        val lastDate = dateRegex.findFirstIn(lastFile.getName)
+            }.toList.sorted
+        if (sortedListOfFiles.isEmpty) {
+            println("[-] There are no previous donwloads found in the pod_dir! Using today to start")
+            LocalDate.now
+        }
+        else{
+            val lastFile = sortedListOfFiles.sorted.last
+            val lastDate: Option[String] = dateRegex.findFirstIn(lastFile.getName)
 
-        lastDate match{
-            case Some(datestr) => parseDate(datestr)
-            case None => LocalDate.now
+            val tryParse = for {
+                date <- lastDate
+                parsed <- parseDate(date).toOption
+            } yield parsed.plusDays(1)
+
+            tryParse getOrElse LocalDate.now
+        }
+    }
+
+    def catchupmode() = {
+        val lastcomplete = lastCompleteDate
+        val endDate = LocalDate.now
+
+        if(lastcomplete.isAfter(endDate)){
+            println("[*] No new media to catch up on, we are up to date.")
+        }
+        else{
+            normalmode(lastcomplete,endDate)
         }
     }
 
     def normalmode(startDate: LocalDate, endDate: LocalDate) = {
         if(startDate.isAfter(endDate)){
-            println("[*] Already up to date.")
+            println("[!] Start date is after end date!.")
         }
         else{
             printf("[*] Grabbing NASA POD from %s -> %s\n",startDate.format(fmt),
@@ -80,20 +95,8 @@ object Grab {
         }
     }
 
-    def parseDate(datein: String): LocalDate = {
-        try{
-            LocalDate.parse(datein,fmt)
-        }
-        catch{
-            case parseEx : java.time.format.DateTimeParseException => 
-                error("Invalid date input (%s). Must be yyyy-mm-dd.".format(datein))
-                // Keep compiler happy (unreachable code)
-                LocalDate.now
-            case e  : Throwable => 
-                e.printStackTrace
-                // Keep compiler happy (unreachable code)
-                LocalDate.now
-        }
+    def parseDate(datein: String): Try[LocalDate] = {
+        Try(LocalDate.parse(datein,fmt))
     }
 
     def parseArgs(args: Array[String]): Map[Symbol,Any] = {
@@ -106,10 +109,15 @@ object Grab {
                     nextOption(map ++ Map('mode -> value), tail)
 
                 case ("-s" | "--start") :: value :: tail =>
-                    nextOption(map ++ Map('start -> parseDate(value)), tail)
+                    parseDate(value) match {
+                        case Success(startDate) => nextOption(map ++ Map('start -> startDate), tail)
+                        case Failure(ex) => error("Invalid start date input (%s). Must be yyyy-mm-dd.".format(value)); map
+                    }
                 case ("-e" | "--end") :: value :: tail =>
-                    nextOption(map ++ Map('end -> parseDate(value)), tail)
-
+                    parseDate(value) match {
+                        case Success(endDate) => nextOption(map ++ Map('end -> endDate), tail)
+                        case Failure(ex) => error("Invalid end date input (%s). Must be yyyy-mm-dd.".format(value)); map
+                    }
                 case option :: tail => {
                     println("Unknown option "+option) 
                     map
