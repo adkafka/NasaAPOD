@@ -14,14 +14,11 @@ import scala.language.postfixOps //Allow '!!' and '!' at end of pipe call
 
 object Grab { 
     /* 
-     * TODO...
-     * Add more params
-        * -s startdate [yyyy-mm-dd]
-        * -e enddate [yyyy-mm-dd]
-        * -mode catch-up : Start date at last succesful date (last file in pod_dir)
-     * USAGE... and complimentary error func
+     * TODO:
+     * Deal with API limits
      */
     val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+    val dateRegex = """(\d\d\d\d)-(\d\d)-(\d\d)""".r
 
     def main(args: Array[String]) = {
         val options = parseArgs(args)
@@ -49,7 +46,8 @@ USAGE:
 PARAMS: 
   -m, --mode [MODE]     Specify mode of operation. Valid options are:
                         'normal'    : Download all media between start 
-                                      and end date (inclusive)
+                                      and end date (inclusive). This is
+                                      the default mode of operation.
                         'catch-up'  : Use the last succesfully downloaded 
                                       media date as a start date. This is
                                       useful if the script is run regularly,
@@ -68,7 +66,6 @@ PARAMS:
     }
 
     def lastCompleteDate(): LocalDate = {
-        val dateRegex = """(\d\d\d\d)-(\d\d)-(\d\d)""".r
         val dest_dir = new java.io.File(Config.pod_dir)
         // Make sure directory in config is present
         if(!dest_dir.exists){
@@ -83,14 +80,14 @@ PARAMS:
             LocalDate.now
         }
         else{
-            val lastFile = sortedListOfFiles.sorted.last
+            val lastFile = sortedListOfFiles.last
             val lastDate: Option[String] = dateRegex.findFirstIn(lastFile.getName)
-
             val tryParse = for {
                 date <- lastDate
                 parsed <- parseDate(date).toOption
             } yield parsed.plusDays(1)
 
+            // Return either the succesfully parsed new start date, or today if parse failed
             tryParse getOrElse LocalDate.now
         }
     }
@@ -100,7 +97,7 @@ PARAMS:
         val endDate = LocalDate.now
 
         if(lastcomplete.isAfter(endDate)){
-            println("[*] No new media to catch up on, we are up to date.")
+            println("[*] No new media to catch up on, we are up to date.\n")
         }
         else{
             normalmode(lastcomplete,endDate)
@@ -112,7 +109,7 @@ PARAMS:
             println("[!] Start date is after end date!.")
         }
         else{
-            printf("[*] Grabbing NASA POD from %s -> %s\n",startDate.format(fmt),
+            printf("[*] Grabbing NASA APOD from %s -> %s\n",startDate.format(fmt),
                 endDate.format(fmt))
 
             // For every date from start to end inclusive...
@@ -122,7 +119,7 @@ PARAMS:
                 // Grab the file if we don't already have it
                 MediaGrabber.CheckAndGrab(startDate.plusDays(diff))
             }
-            println("[+] No more dates, done")
+            println("[+] No more dates, done\n")
         }
     }
 
@@ -154,7 +151,7 @@ PARAMS:
                     map
                 }
                 case option :: tail => {
-                    println("Unknown option "+option) 
+                    println("[!] Unknown option "+option) 
                     map
                 }
             }
@@ -264,12 +261,10 @@ object MediaGrabber{
      * an option */
     def FetchJson(date : String = "") : Option[Response] = {
         val API_KEY = Config.api_key
-        var URL = "https://api.nasa.gov/planetary/apod"
-        URL = URL.concat("?api_key=%s".format(API_KEY))
-        if (date != ""){
-            URL = URL.concat("&date=%s".format(date))
-        }
-        URL = URL.concat("&hd=True")
+        val URL = "https://api.nasa.gov/planetary/apod" ++
+                  "?api_key=%s".format(API_KEY) ++
+                  (if (date != "") "&date=%s".format(date) else "") ++
+                  "&hd=True"
         try{
             val json = Source.fromURL(URL)
             val jsonTree = parse(json.mkString)
