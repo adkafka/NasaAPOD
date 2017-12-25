@@ -16,6 +16,8 @@ object Grab {
     /* 
      * TODO:
      * Deal with API limits
+     * Detect non-zero exit codes, and cleaup up files that were created. For example
+     *   if `youtube-dl` fails in the middle of a download, temporary files are created.
      */
     val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd")
     val dateRegex = """(\d\d\d\d)-(\d\d)-(\d\d)""".r
